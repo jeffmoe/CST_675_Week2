@@ -81,17 +81,23 @@ def check_disjoint(seeds) -> None:
 class QLearningConfig:
     alpha: float = 0.1       # learning rate
     gamma: float = 0.95      # discount factor (see module docstring)
-    episodes: int = 3000     # 30-day episodes per training run
-    q_init: float = 0.0      # initial value of every Q-table entry
-    # On optimistic initialization:
-    # every reward here is negative (it is a cost), so the true Q-values are
-    # all below 0. That means q_init = 0.0 is already *optimistic*: any
-    # untried action looks better than one that has been tried and has cost
-    # something, so even a purely greedy agent sweeps through actions early
-    # on. Raising q_init (e.g. +5) would make that systematic exploration
-    # stronger and longer-lasting. Setting it pessimistic (e.g. -50, below
-    # the real values) would remove it, leaving all exploration to the
-    # strategy. Keeping 0.0 for every strategy keeps the comparison fair.
+    episodes: int = 6000     # 30-day episodes per training run
+    q_init: float = -20.0    # initial value of every Q-table entry
+    # On initialization (and why -20, not 0):
+    # Every reward here is negative (it is a cost), so every true Q-value is
+    # below 0. Starting at 0 would be *optimistic*: any untried action looks
+    # better than one that has been tried and has cost something. That does
+    # drive exploration, and raising q_init further (e.g. +5) would make it
+    # stronger and last longer. The downside showed up in testing: with 512
+    # states, many actions are tried only a few times, keep a value near 0,
+    # and the greedy test policy then picks those barely-tested actions.
+    # Softmax and UCB were hurt most, because their exploration does not
+    # keep re-testing whatever currently looks best the way epsilon-greedy
+    # does. -20 is a realistic starting guess: about -1 reward per day over
+    # the ~20-day effective horizon (1 / (1 - gamma)). It is neither strongly
+    # optimistic nor pessimistic, so exploration comes from the strategy
+    # being tested. The same value is used for every strategy, so the
+    # comparison stays fair.
 
 
 # ---------------------------------------------------------------------------

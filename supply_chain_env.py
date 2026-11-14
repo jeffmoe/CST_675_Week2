@@ -39,11 +39,18 @@ SURGE_PROB = np.array([0.15, 0.15, 0.0])       # chance a day is a surge day
 SURGE_MULT = 2.0                               # surge-day multiplier on mean
 
 # Inventory buckets in "days of supply" (on-hand / base daily mean demand):
-#   0 critical: < 1 day     1 low: 1-3 days     2 ok: 3-6 days
-#   3 high:     6-9 days    4 over: >= 9 days
-BUCKET_NAMES = ["critical", "low", "ok", "high", "over"]
-BUCKET_EDGES_DAYS = np.array([1.0, 3.0, 6.0, 9.0])
+#   0 critical: < 1 day     1 low: 1-3 days
+#   2 ok:       3-7 days    3 high: >= 7 days
+BUCKET_NAMES = ["critical", "low", "ok", "high"]
+BUCKET_EDGES_DAYS = np.array([1.0, 3.0, 7.0])
 N_BUCKETS = len(BUCKET_NAMES)
+
+# Each location also has an "inbound" flag: is at least one shipment to it
+# already on the way? Without this the agent cannot tell "low and nothing
+# coming" from "low but a truck arrives tomorrow", so it keeps re-ordering
+# for locations that are already being restocked.
+N_TRANSIT_FLAGS = 2
+STATES_PER_LOCATION = N_BUCKETS * N_TRANSIT_FLAGS      # 4 x 2 = 8
 
 # Storage limit per location (cold-chain fridge space), in days of supply.
 # Units delivered above this cap are wasted.
@@ -148,7 +155,7 @@ class PharmaSupplyChainEnv(gym.Env):
         super().__init__()
         self.reward_config = reward_config
         self.n_locations = len(LOCATIONS)
-        self.n_states = N_BUCKETS ** self.n_locations       # 5^3 = 125
+        self.n_states = STATES_PER_LOCATION ** self.n_locations   # 8^3 = 512
         self.n_actions = len(ACTION_TABLE)                   # 19
         self.observation_space = spaces.Discrete(self.n_states)
         self.action_space = spaces.Discrete(self.n_actions)
@@ -156,25 +163,37 @@ class PharmaSupplyChainEnv(gym.Env):
 
     # ------------------------------------------------------------------ state
     def bucket(self, loc: int, units: int) -> int:
-        """Map one location's on-hand units to a 0-4 bucket index."""
+        """Map one location's on-hand units to a 0-3 bucket index."""
         days_of_supply = units / DEMAND_MEAN[loc]
         return int(np.searchsorted(BUCKET_EDGES_DAYS, days_of_supply, side="right"))
 
+    def inbound(self, loc: int) -> int:
+        """1 if at least one shipment to this location is still in transit."""
+        return int(any(s["dest"] == loc for s in self.pipeline))
+
     def encode_state(self) -> int:
-        """Map (bucket_A, bucket_B, bucket_R) to one integer in [0, 125)
-        so it can index a row of the Q-table (base-5 number)."""
+        """Map each location's (bucket, inbound flag) to one integer in
+        [0, 512) so it can index a row of the Q-table.
+
+        Per location: digit = bucket * 2 + inbound  (0-7)
+        Whole state : base-8 number with one digit per location.
+        """
         code = 0
         for loc in range(self.n_locations):
-            code = code * N_BUCKETS + self.bucket(loc, self.inventory[loc])
+            digit = self.bucket(loc, self.inventory[loc]) * N_TRANSIT_FLAGS + self.inbound(loc)
+            code = code * STATES_PER_LOCATION + digit
         return code
 
     @staticmethod
     def decode_state(code: int) -> list[str]:
-        """Inverse of encode_state, for readable logs and policy tables."""
+        """Inverse of encode_state, for readable logs and policy tables,
+        e.g. ['low+inbound', 'ok', 'critical']."""
         names = []
         for _ in range(len(LOCATIONS)):
-            names.append(BUCKET_NAMES[code % N_BUCKETS])
-            code //= N_BUCKETS
+            digit = code % STATES_PER_LOCATION
+            b, flag = divmod(digit, N_TRANSIT_FLAGS)
+            names.append(BUCKET_NAMES[b] + ("+inbound" if flag else ""))
+            code //= STATES_PER_LOCATION
         return names[::-1]
 
     # ----------------------------------------------------------------- action
@@ -287,12 +306,14 @@ class PharmaSupplyChainEnv(gym.Env):
             "inventory": self.inventory.tolist(),
             "buckets": [BUCKET_NAMES[self.bucket(i, u)]
                         for i, u in enumerate(self.inventory)],
+            "inbound": [self.inbound(i) for i in range(len(self.inventory))],
             "in_transit_units": int(sum(s["qty"] for s in self.pipeline)),
         }
 
     def render(self):
         if self.render_mode == "ansi":
-            parts = [f"{n}: {u} ({BUCKET_NAMES[self.bucket(i, u)]})"
+            parts = [f"{n}: {u} ({BUCKET_NAMES[self.bucket(i, u)]}"
+                     f"{', inbound' if self.inbound(i) else ''})"
                      for i, (n, u) in enumerate(zip(LOCATIONS, self.inventory))]
             return f"Day {self.day:2d} | " + " | ".join(parts)
         return None

@@ -64,12 +64,12 @@ class DecayingEpsilonGreedy(ActionSelector):
     """epsilon_k = max(floor, start * decay**k) after k completed episodes.
 
     The decay rate is derived from `episodes_to_floor` so the schedule is
-    easy to explain: epsilon falls from 1.0 to 0.05 over the first 2,000
+    easy to explain: epsilon falls from 1.0 to 0.05 over the first 4,000
     episodes, then stays at 0.05.
     """
 
     def __init__(self, start: float = 1.0, floor: float = 0.05,
-                 episodes_to_floor: int = 2000):
+                 episodes_to_floor: int = 4000):
         self.start, self.floor = start, floor
         self.decay = (floor / start) ** (1.0 / episodes_to_floor)
         self.epsilon = start
@@ -153,7 +153,7 @@ def all_variants() -> list[ActionSelector]:
     strategies keep internal state (counts, epsilon) between episodes."""
     return [
         EpsilonGreedy(0.01), EpsilonGreedy(0.1), EpsilonGreedy(0.3),
-        DecayingEpsilonGreedy(start=1.0, floor=0.05, episodes_to_floor=2000),
+        DecayingEpsilonGreedy(start=1.0, floor=0.05, episodes_to_floor=4000),
         Softmax(0.5), Softmax(1.0), Softmax(5.0),
         UCB(0.5), UCB(1.0), UCB(2.0),
     ]
@@ -170,7 +170,7 @@ def comparison_set() -> list[ActionSelector]:
     """
     return [
         EpsilonGreedy(0.01), EpsilonGreedy(0.1), EpsilonGreedy(0.3),
-        DecayingEpsilonGreedy(start=1.0, floor=0.05, episodes_to_floor=2000),
+        DecayingEpsilonGreedy(start=1.0, floor=0.05, episodes_to_floor=4000),
         Softmax(0.5), Softmax(5.0),
         UCB(0.5), UCB(2.0),
     ]
